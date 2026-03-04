@@ -1,297 +1,934 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Control de Asistencia QR</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
-    body{font-family:system-ui,Arial;margin:0;padding:16px;background:#f4f6f8}
-    .box{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.08)}
-    h1{margin:0 0 8px}
-    #reader{width:100%;max-width:360px;margin:12px auto;border:2px dashed #ddd;border-radius:12px;overflow:hidden}
-    label{display:block;margin-top:12px;font-weight:600}
-    input,select,button{width:100%;padding:12px;border-radius:10px;border:2px solid #e5e7eb;font-size:16px}
-    button{background:#4CAF50;border:none;color:#fff;font-weight:700;cursor:pointer;margin-top:12px}
-    button:disabled{background:#bbb;cursor:not-allowed}
-    #respuesta{margin-top:12px;padding:12px;border-radius:10px;display:none;font-weight:700;text-align:center}
-    .success{background:#d4edda;color:#155724}
-    .warning{background:#fff3cd;color:#856404}
-    .error{background:#f8d7da;color:#721c24}
-    .info{margin-top:10px;padding:12px;border-radius:10px;background:#f8fafc;border:2px solid #e5e7eb;display:none}
-    .row{display:flex;gap:10px}
-    .row > div{flex:1}
-    small{opacity:.7}
+    :root {
+      --primary: #4CAF50;
+      --primary-dark: #45a049;
+      --secondary: #2196F3;
+      --secondary-dark: #1976D2;
+      --success: #d4edda;
+      --success-text: #155724;
+      --error: #f8d7da;
+      --error-text: #721c24;
+      --warning: #fff3cd;
+      --warning-text: #856404;
+      --bg-main: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      --shadow: 0 4px 20px rgba(0,0,0,0.15);
+      --border-radius: 12px;
+      --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-main);
+      min-height: 100vh;
+      padding: 10px;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: min(500px, 100vw - 20px);
+      margin: 0 auto;
+      background: white;
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      animation: slideIn 0.5s ease-out;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .header {
+      background: var(--primary);
+      color: white;
+      padding: clamp(15px, 4vw, 25px);
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: clamp(18px, 5vw, 24px);
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    .header p {
+      font-size: clamp(12px, 3vw, 14px);
+      opacity: 0.9;
+    }
+
+    .content {
+      padding: clamp(15px, 5vw, 30px);
+    }
+
+    .time-display {
+      background: linear-gradient(45deg, #e8f5e8, #f0fff0);
+      border: 2px solid var(--primary);
+      border-radius: var(--border-radius);
+      padding: 15px;
+      text-align: center;
+      margin-bottom: 20px;
+      font-size: clamp(14px, 4vw, 18px);
+      font-weight: 600;
+      color: #2e7d32;
+    }
+
+    .camera-toggle {
+      background: #f8f9fa;
+      border: 2px solid #e9ecef;
+      border-radius: var(--border-radius);
+      padding: 15px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    .toggle-wrapper {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 50px;
+      height: 28px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: var(--transition);
+      border-radius: 28px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: var(--transition);
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--primary);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(22px);
+    }
+
+    .camera-controls {
+      display: none;
+      margin-bottom: 15px;
+    }
+
+    .camera-select select {
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #ddd;
+      border-radius: var(--border-radius);
+      font-size: 14px;
+      background: white;
+    }
+
+    #reader {
+      width: 100%;
+      max-width: min(300px, 90vw);
+      margin: 0 auto 20px;
+      border: 2px dashed #ddd;
+      border-radius: var(--border-radius);
+      overflow: hidden;
+      display: none;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #333;
+      font-size: clamp(14px, 3.5vw, 16px);
+    }
+
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: clamp(10px, 3vw, 14px);
+      border: 2px solid #ddd;
+      border-radius: var(--border-radius);
+      font-size: clamp(14px, 4vw, 16px);
+      transition: var(--transition);
+      background: white;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+    }
+
+    .btn {
+      width: 100%;
+      padding: clamp(12px, 3vw, 16px);
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: var(--border-radius);
+      font-size: clamp(14px, 4vw, 16px);
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: var(--primary-dark);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+
+    .btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-secondary {
+      background: var(--secondary);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--secondary-dark);
+    }
+
+    .employee-info {
+      background: linear-gradient(45deg, #f8f9fa, #ffffff);
+      border: 2px solid var(--primary);
+      border-radius: var(--border-radius);
+      padding: 15px;
+      margin-bottom: 20px;
+      display: none;
+      box-shadow: 0 2px 10px rgba(76, 175, 80, 0.1);
+    }
+
+    .employee-info h3 {
+      color: var(--primary);
+      margin-bottom: 10px;
+      font-size: clamp(16px, 4vw, 18px);
+    }
+
+    .employee-info p {
+      margin: 5px 0;
+      color: #6c757d;
+      font-size: clamp(13px, 3vw, 14px);
+    }
+
+    .employee-info .highlight {
+      font-weight: 600;
+      color: #495057;
+    }
+
+    #respuesta {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: var(--border-radius);
+      text-align: center;
+      font-weight: 600;
+      display: none;
+      font-size: clamp(13px, 3.5vw, 15px);
+    }
+
+    .success {
+      background: var(--success);
+      color: var(--success-text);
+      border: 1px solid #c3e6cb;
+    }
+
+    .error {
+      background: var(--error);
+      color: var(--error-text);
+      border: 1px solid #f5c6cb;
+    }
+
+    .warning {
+      background: var(--warning);
+      color: var(--warning-text);
+      border: 1px solid #ffeaa7;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .qr-status {
+      text-align: center;
+      padding: 10px;
+      margin-bottom: 15px;
+      border-radius: var(--border-radius);
+      background: #e3f2fd;
+      color: #1565c0;
+      display: none;
+      font-size: clamp(12px, 3vw, 14px);
+    }
+
+    .admin-panel {
+      margin-top: 20px;
+      border: 2px dashed #cbd5e1;
+      border-radius: var(--border-radius);
+      padding: 12px;
+      background: #f8fafc;
+    }
+
+    .admin-panel h4 {
+      font-size: clamp(14px, 4vw, 16px);
+      margin-bottom: 10px;
+      color: #1f2937;
+    }
+
+    .admin-status {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: var(--border-radius);
+      font-size: clamp(12px, 3vw, 14px);
+      text-align: center;
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 5px; }
+      .content { padding: 15px; }
+      .toggle-wrapper { justify-content: center; }
+    }
+
+    @media (min-width: 768px) {
+      .container { margin-top: 20px; }
+    }
+
+    @media (orientation: landscape) and (max-height: 500px) {
+      .header { padding: 10px; }
+      .content { padding: 15px; }
+      .time-display { margin-bottom: 10px; padding: 10px; }
+    }
   </style>
 </head>
 <body>
-  <div class="box">
-    <h1>Aula PIP</h1>
-    <small>Escanea tu QR o ingresa tu ID</small>
-
-    <div id="reloj" style="margin-top:10px;font-weight:700"></div>
-
-    <div id="reader"></div>
-
-    <label for="id">ID del Estudiante</label>
-    <input id="id" placeholder="Ingrese su ID" autocomplete="off"/>
-
-    <div class="info" id="info">
-      <div><b>Nombre:</b> <span id="iNombre">-</span></div>
-      <div><b>Grado/Sección:</b> <span id="iArea">-</span></div>
-      <div><b>Perfil:</b> <span id="iCargo">-</span></div>
+  <div class="container">
+    <div class="header">
+      <h1>Aula PIP</h1>
+      <p>Escanea tu codigo QR o ingresa tu ID</p>
     </div>
 
-    <label for="estado">Estado</label>
-    <select id="estado">
-      <option value="INGRESO">INGRESO</option>
-      <option value="SALIDA">SALIDA</option>
-    </select>
+    <div class="content">
+      <div class="time-display" id="reloj-tiempo">Cargando...</div>
 
-    <button id="btn" disabled>Registrar Asistencia</button>
+      <div class="camera-toggle">
+        <div class="toggle-wrapper">
+          <span>Camara:</span>
+          <label class="switch">
+            <input type="checkbox" id="camera-toggle" checked>
+            <span class="slider"></span>
+          </label>
+          <span id="camera-status">Activada</span>
+        </div>
+      </div>
 
-    <div id="respuesta"></div>
+      <div class="qr-status" id="qr-status">Iniciando camara...</div>
 
-    <hr style="margin:18px 0; border:none; border-top:1px solid #eee"/>
+      <div class="camera-controls" id="camera-controls">
+        <div class="camera-select">
+          <select id="camera-select">
+            <option value="">Seleccione una camara...</option>
+          </select>
+        </div>
+      </div>
 
-    <h3 style="margin:0 0 10px">Panel Administrador</h3>
-    <label for="admin-id">Generar carnet por ID</label>
-    <input id="admin-id" placeholder="ID"/>
-    <button id="btnCarnet">Generar carnet PDF</button>
+      <div id="reader"></div>
 
-    <label for="admin-grado" style="margin-top:14px">Generar lote por grado/sección</label>
-    <select id="admin-grado"><option value="">Cargando...</option></select>
-    <button id="btnLote">Generar lote PDF</button>
+      <button type="button" class="btn btn-secondary" id="reiniciar-btn" onclick="reiniciarQR()" style="display: none;">
+        Reiniciar Escaner
+      </button>
+
+      <form id="formulario">
+        <div class="form-group">
+          <label for="id">ID del Estudiante:</label>
+          <input type="text" id="id" required placeholder="Ingrese su ID">
+        </div>
+
+        <div class="employee-info" id="employee-info">
+          <h3>Informacion del Estudiante</h3>
+          <p><strong>Nombre:</strong> <span id="employee-name" class="highlight">-</span></p>
+          <p><strong>Grado/Seccion:</strong> <span id="employee-area" class="highlight">-</span></p>
+          <p><strong>Perfil:</strong> <span id="employee-position" class="highlight">-</span></p>
+        </div>
+
+        <div class="form-group">
+          <label for="estado">Estado:</label>
+          <select id="estado" required>
+            <option value="INGRESO">INGRESO</option>
+            <option value="SALIDA">SALIDA</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn" id="btn-submit" disabled>
+          Registrar Asistencia
+        </button>
+      </form>
+
+      <div id="respuesta"></div>
+
+      <div class="admin-panel">
+        <button type="button" class="btn btn-secondary" id="admin-toggle">Panel Administrador</button>
+        <div id="admin-body" style="display: none;">
+          <h4>Generar Carnets</h4>
+          <div class="form-group">
+            <label for="admin-id">ID del Estudiante:</label>
+            <input type="text" id="admin-id" placeholder="Ingrese ID">
+          </div>
+          <button type="button" class="btn" id="admin-generar-id">Generar carnet PDF</button>
+          <div class="form-group">
+            <label for="admin-grado">Grado/Seccion:</label>
+            <select id="admin-grado">
+              <option value="">Seleccione...</option>
+            </select>
+          </div>
+          <button type="button" class="btn" id="admin-generar-lote">Generar lote PDF</button>
+          <div id="admin-status" class="admin-status"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
-<script>
-/************* CONFIG *************/
-const API_URL = "PEGA_AQUI_TU_URL_EXEC";     // <- EJ: https://script.google.com/macros/s/XXXX/exec
-const API_KEY = "CAMBIA_ESTE_TOKEN_LARGO_Y_SEGURO"; // <- igual al de Apps Script
+  <script>
+    /************* CONFIG (CAMBIA ESTO) *************/
+    const API_URL = "https://script.google.com/macros/s/AKfycbyRHWNAnd6s8k5QSpguMI-V5ioGcvf1nCph86Hfe67p_h-9uwG8EoJzP00_JPq4ARwi/exec"; // ejemplo: https://script.google.com/macros/s/XXXX/exec
+    const API_KEY = "MEDASSISTENCIA123"; // mismo token que en Apps Script
 
-/************* JSONP HELPER (evita CORS) *************/
-function api(action, params = {}) {
-  return new Promise((resolve, reject) => {
-    const cb = "__cb_" + Math.random().toString(36).slice(2);
-    window[cb] = (data) => {
-      cleanup();
-      resolve(data);
-    };
+    /************* JSONP helper (sin CORS) *************/
+    function api(action, params = {}) {
+      return new Promise((resolve, reject) => {
+        const cb = "__cb_" + Math.random().toString(36).slice(2);
+        window[cb] = (data) => {
+          cleanup();
+          resolve(data);
+        };
 
-    const qs = new URLSearchParams();
-    qs.set("action", action);
-    qs.set("key", API_KEY);
-    qs.set("callback", cb);
+        const qs = new URLSearchParams();
+        qs.set("action", action);
+        qs.set("key", API_KEY);
+        qs.set("callback", cb);
 
-    for (const [k, v] of Object.entries(params)) {
-      qs.set(k, typeof v === "string" ? v : JSON.stringify(v));
-    }
-
-    const s = document.createElement("script");
-    s.src = API_URL + "?" + qs.toString();
-    s.onerror = () => { cleanup(); reject(new Error("Error de red / API")); };
-    document.head.appendChild(s);
-
-    function cleanup() {
-      try { delete window[cb]; } catch(e) {}
-      if (s && s.parentNode) s.parentNode.removeChild(s);
-    }
-  });
-}
-
-/************* UI *************/
-let studentData = null;
-let qr = null;
-let isScanning = false;
-
-function showMsg(msg, type){
-  const el = document.getElementById("respuesta");
-  el.className = type;
-  el.textContent = msg;
-  el.style.display = "block";
-  if(type === "success") setTimeout(()=> el.style.display="none", 4000);
-}
-
-function showStudent(d){
-  studentData = d;
-  document.getElementById("info").style.display = "block";
-  document.getElementById("iNombre").textContent = d.nombre || "-";
-  document.getElementById("iArea").textContent = d.area || "-";
-  document.getElementById("iCargo").textContent = d.cargo || "-";
-  document.getElementById("btn").disabled = false;
-}
-
-function hideStudent(){
-  studentData = null;
-  document.getElementById("info").style.display = "none";
-  document.getElementById("btn").disabled = true;
-}
-
-async function buscar(id){
-  if(!id) { hideStudent(); return; }
-  try{
-    const r = await api("buscarEstudiante", { id });
-    if(r && r.encontrado){
-      showStudent(r.datos);
-    } else {
-      hideStudent();
-      showMsg((r && r.mensaje) || "No encontrado", "warning");
-    }
-  } catch(e){
-    hideStudent();
-    showMsg("Error al buscar estudiante", "error");
-  }
-}
-
-async function registrar(){
-  const id = document.getElementById("id").value.trim();
-  const estado = document.getElementById("estado").value;
-
-  if(!id || !studentData){
-    showMsg("Ingrese un ID válido", "error");
-    return;
-  }
-
-  document.getElementById("btn").disabled = true;
-  try{
-    const payload = {
-      id,
-      nombre: studentData.nombre,
-      area: studentData.area,
-      cargo: studentData.cargo,
-      telefono: studentData.telefono || "",
-      estado
-    };
-
-    const r = await api("registrarAsistencia", { data: payload });
-
-    if(r && r.exito){
-      showMsg(`${estado} registrado para ${studentData.nombre} a las ${r.hora}`, "success");
-      document.getElementById("id").value = "";
-      document.getElementById("estado").value = "INGRESO";
-      hideStudent();
-    } else {
-      showMsg((r && r.mensaje) || "No se pudo registrar", "warning");
-      document.getElementById("btn").disabled = false;
-    }
-  } catch(e){
-    showMsg("Error de conexión al registrar", "error");
-    document.getElementById("btn").disabled = false;
-  }
-}
-
-/************* QR *************/
-async function startQR(){
-  try{
-    qr = new Html5Qrcode("reader");
-    await qr.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: 250 },
-      (text) => {
-        const id = (text || "").trim();
-        if(id){
-          document.getElementById("id").value = id;
-          buscar(id);
-          showMsg("ID cargado desde QR", "success");
+        for (const [k, v] of Object.entries(params)) {
+          qs.set(k, typeof v === "string" ? v : JSON.stringify(v));
         }
+
+        const s = document.createElement("script");
+        s.src = API_URL + "?" + qs.toString();
+        s.onerror = () => { cleanup(); reject(new Error("Error de red / API")); };
+        document.head.appendChild(s);
+
+        function cleanup() {
+          try { delete window[cb]; } catch(e) {}
+          if (s && s.parentNode) s.parentNode.removeChild(s);
+        }
+      });
+    }
+
+    let qrCodeReader = null;
+    let isScanning = false;
+    let searchTimeout = null;
+    let studentData = null;
+    let selectedCameraId = null;
+    let cameraEnabled = true;
+    let serverEpochMs = null;
+    let perfStartMs = null;
+
+    function obtenerAhoraServidorMs() {
+      if (serverEpochMs === null || perfStartMs === null || !window.performance) {
+        return Date.now();
       }
-    );
-    isScanning = true;
-  } catch(err){
-    console.error(err);
-    showMsg("No se pudo acceder a la cámara (revisa permisos del navegador)", "error");
-  }
-}
+      return serverEpochMs + (performance.now() - perfStartMs);
+    }
 
-/************* Admin: PDF *************/
-function downloadBase64(base64, filename, mime){
-  const a = document.createElement("a");
-  a.href = `data:${mime};base64,${base64}`;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
+    function actualizarReloj() {
+      const ahora = new Date(obtenerAhoraServidorMs());
+      const hora = ahora.toLocaleTimeString('es-PE', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'America/Lima'
+      });
+      const fecha = ahora.toLocaleDateString('es-PE', {
+        weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Lima'
+      });
+      document.getElementById('reloj-tiempo').innerHTML = `${hora}<br><small>${fecha}</small>`;
+    }
 
-async function cargarGrados(){
-  try{
-    const r = await api("listarGradosSecciones");
-    const sel = document.getElementById("admin-grado");
-    sel.innerHTML = '<option value="">Seleccione...</option>';
-    (r.grados || []).forEach(g=>{
-      const o = document.createElement("option");
-      o.value = g;
-      o.textContent = g;
-      sel.appendChild(o);
+    async function sincronizarHoraPeru() {
+      try {
+        const resultado = await api("obtenerHoraPeru");
+        if (resultado && typeof resultado.timestamp === 'number') {
+          serverEpochMs = resultado.timestamp;
+          perfStartMs = performance.now();
+          actualizarReloj();
+        }
+      } catch (e) {
+        // fallback
+        serverEpochMs = Date.now();
+        perfStartMs = performance.now();
+      }
+    }
+
+    function esMobile() {
+      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    }
+
+    function actualizarEstadoQR(mensaje, esError = false) {
+      const statusEl = document.getElementById('qr-status');
+      statusEl.textContent = mensaje;
+      statusEl.style.background = esError ? '#ffebee' : '#e3f2fd';
+      statusEl.style.color = esError ? '#c62828' : '#1565c0';
+      statusEl.style.display = 'block';
+    }
+
+    function toggleCamera(enabled) {
+      cameraEnabled = enabled;
+      const statusSpan = document.getElementById('camera-status');
+      const elements = ['reader', 'qr-status', 'reiniciar-btn', 'camera-controls'];
+
+      if (enabled) {
+        statusSpan.textContent = 'Activada';
+        statusSpan.style.color = 'var(--primary)';
+        ['reader','qr-status'].forEach(id => document.getElementById(id).style.display = 'block');
+        document.getElementById('reiniciar-btn').style.display = 'block';
+        cargarCamaras();
+      } else {
+        statusSpan.textContent = 'Desactivada';
+        statusSpan.style.color = '#999';
+        detenerEscaneo();
+        elements.forEach(id => document.getElementById(id).style.display = 'none');
+      }
+    }
+
+    function detenerEscaneo() {
+      if (qrCodeReader && isScanning) {
+        qrCodeReader.stop().then(() => {
+          qrCodeReader = null;
+          isScanning = false;
+        }).catch(err => console.error('Error stopping scanner:', err));
+      }
+    }
+
+    function cargarCamaras() {
+      if (!cameraEnabled) return;
+
+      Html5Qrcode.getCameras()
+        .then(devices => {
+          if (esMobile() && devices.length > 1) {
+            mostrarSelectorCamara(devices);
+          } else if (devices.length > 0) {
+            selectedCameraId = devices.find(d =>
+              (d.label || '').toLowerCase().includes('back') ||
+              (d.label || '').toLowerCase().includes('rear')
+            )?.id || devices[0].id;
+            iniciarEscaneo();
+          } else {
+            actualizarEstadoQR("No se detectaron camaras", true);
+          }
+        })
+        .catch(err => {
+          console.error("Error getting cameras:", err);
+          actualizarEstadoQR("Error al detectar camaras", true);
+        });
+    }
+
+    function mostrarSelectorCamara(devices) {
+      const controlsDiv = document.getElementById('camera-controls');
+      const select = document.getElementById('camera-select');
+
+      select.innerHTML = '<option value="">Seleccione una camara...</option>';
+
+      devices.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.id;
+
+        let tipo = 'Camara ' + (index + 1);
+        const label = (device.label || '').toLowerCase();
+        if (label.includes('back') || label.includes('rear')) tipo = 'Camara Trasera';
+        else if (label.includes('front') || label.includes('user')) tipo = 'Camara Frontal';
+
+        option.textContent = tipo;
+        select.appendChild(option);
+      });
+
+      controlsDiv.style.display = 'block';
+
+      // evita duplicar listeners si se llama varias veces
+      select.onchange = function() {
+        if (this.value) {
+          selectedCameraId = this.value;
+          if (isScanning) reiniciarQR();
+          else iniciarEscaneo();
+        }
+      };
+
+      const rearCamera = devices.find(d => {
+        const label = (d.label || '').toLowerCase();
+        return label.includes('back') || label.includes('rear');
+      });
+
+      if (rearCamera) {
+        select.value = rearCamera.id;
+        selectedCameraId = rearCamera.id;
+        iniciarEscaneo();
+      }
+    }
+
+    function iniciarEscaneo() {
+      if (isScanning || !selectedCameraId || !cameraEnabled) return;
+
+      const readerId = "reader";
+      qrCodeReader = new Html5Qrcode(readerId);
+
+      actualizarEstadoQR("Iniciando camara...");
+
+      const config = {
+        fps: 10,
+        qrbox: {
+          width: Math.min(250, window.innerWidth * 0.7),
+          height: Math.min(250, window.innerWidth * 0.7)
+        },
+        aspectRatio: 1.0
+      };
+
+      qrCodeReader.start(
+        selectedCameraId,
+        config,
+        (decodedText) => {
+          actualizarEstadoQR("QR detectado correctamente");
+          procesarQR(decodedText);
+        },
+        () => {}
+      ).then(() => {
+        isScanning = true;
+        actualizarEstadoQR("Escaneando... Acerca el codigo QR");
+      }).catch(err => {
+        actualizarEstadoQR("Error al acceder a la camara", true);
+        console.error("Error starting QR scanner:", err);
+      });
+    }
+
+    function reiniciarQR() {
+      detenerEscaneo();
+
+      if (selectedCameraId && cameraEnabled) {
+        setTimeout(iniciarEscaneo, 500);
+      } else if (cameraEnabled) {
+        setTimeout(cargarCamaras, 500);
+      }
+    }
+
+    function procesarQR(textoQR) {
+      const idEstudiante = (textoQR || '').trim();
+      document.getElementById("id").value = idEstudiante;
+      buscarEstudiante(idEstudiante);
+      mostrarRespuesta("ID cargado desde QR", "success");
+    }
+
+    async function buscarEstudiante(id) {
+      if (!id.trim()) {
+        ocultarInfoEstudiante();
+        return;
+      }
+
+      mostrarBusqueda();
+
+      try {
+        const resultado = await api("buscarEstudiante", { id });
+        if (resultado && resultado.encontrado) {
+          studentData = resultado.datos;
+          mostrarInfoEstudiante(resultado.datos);
+          habilitarBotonRegistro();
+        } else {
+          ocultarInfoEstudiante();
+          mostrarRespuesta((resultado && resultado.mensaje) || "Estudiante no encontrado", "warning");
+          deshabilitarBotonRegistro();
+        }
+      } catch (e) {
+        ocultarInfoEstudiante();
+        mostrarRespuesta("Error al buscar estudiante", "error");
+        deshabilitarBotonRegistro();
+      }
+    }
+
+    function mostrarBusqueda() {
+      const infoDiv = document.getElementById('employee-info');
+      infoDiv.style.display = 'block';
+      document.getElementById('employee-name').innerHTML = '<div class="loading"></div> Buscando...';
+      document.getElementById('employee-area').textContent = '-';
+      document.getElementById('employee-position').textContent = '-';
+    }
+
+    function mostrarInfoEstudiante(datos) {
+      const infoDiv = document.getElementById('employee-info');
+      infoDiv.style.display = 'block';
+      document.getElementById('employee-name').textContent = datos.nombre || '-';
+      document.getElementById('employee-area').textContent = datos.area || '-';
+      document.getElementById('employee-position').textContent = datos.cargo || '-';
+    }
+
+    function ocultarInfoEstudiante() {
+      document.getElementById('employee-info').style.display = 'none';
+      studentData = null;
+    }
+
+    function habilitarBotonRegistro() {
+      document.getElementById('btn-submit').disabled = false;
+    }
+
+    function deshabilitarBotonRegistro() {
+      document.getElementById('btn-submit').disabled = true;
+    }
+
+    function mostrarRespuesta(mensaje, tipo) {
+      const respuesta = document.getElementById("respuesta");
+      respuesta.textContent = mensaje;
+      respuesta.className = tipo;
+      respuesta.style.display = "block";
+
+      if (tipo === "success") {
+        setTimeout(() => {
+          respuesta.style.display = "none";
+        }, 5000);
+      }
+    }
+
+    function mostrarAdminEstado(mensaje, esError) {
+      const status = document.getElementById('admin-status');
+      status.textContent = mensaje;
+      status.style.display = 'block';
+      status.style.background = esError ? '#fee2e2' : '#dcfce7';
+      status.style.color = esError ? '#b91c1c' : '#166534';
+    }
+
+    function descargarArchivo(base64, filename, mimeType) {
+      const enlace = document.createElement('a');
+      enlace.href = 'data:' + mimeType + ';base64,' + base64;
+      enlace.download = filename;
+      document.body.appendChild(enlace);
+      enlace.click();
+      document.body.removeChild(enlace);
+    }
+
+    async function cargarGradosSecciones() {
+      try {
+        const resultado = await api("listarGradosSecciones");
+        const select = document.getElementById('admin-grado');
+        if (!resultado || resultado.error) {
+          mostrarAdminEstado('No se pudo cargar grados/seccion', true);
+          return;
+        }
+        const grados = resultado.grados || [];
+        select.innerHTML = '<option value="">Seleccione...</option>';
+        grados.forEach(g => {
+          const option = document.createElement('option');
+          option.value = g;
+          option.textContent = g;
+          select.appendChild(option);
+        });
+      } catch (e) {
+        mostrarAdminEstado('No se pudo cargar grados/seccion', true);
+      }
+    }
+
+    async function enviarFormulario(event) {
+      event.preventDefault();
+
+      const id = document.getElementById("id").value.trim();
+      const estado = document.getElementById("estado").value;
+
+      if (!id || !studentData) {
+        mostrarRespuesta("Por favor ingrese un ID valido", "error");
+        return;
+      }
+
+      const btnSubmit = document.getElementById("btn-submit");
+      btnSubmit.innerHTML = '<div class="loading"></div> Registrando...';
+      btnSubmit.disabled = true;
+
+      const data = {
+        id: id,
+        nombre: studentData.nombre,
+        area: studentData.area,
+        cargo: studentData.cargo,
+        telefono: studentData.telefono || '',
+        estado: estado
+      };
+
+      try {
+        const resultado = await api("registrarAsistencia", { data });
+
+        btnSubmit.innerHTML = 'Registrar Asistencia';
+
+        if (resultado && resultado.exito) {
+          const mensaje = `${estado} registrado para ${studentData.nombre} a las ${resultado.hora}`;
+          mostrarRespuesta(mensaje, "success");
+
+          document.getElementById("formulario").reset();
+          document.getElementById("estado").value = "INGRESO";
+          ocultarInfoEstudiante();
+          deshabilitarBotonRegistro();
+
+        } else {
+          mostrarRespuesta((resultado && resultado.mensaje) || "No se pudo registrar", "warning");
+          habilitarBotonRegistro();
+        }
+      } catch (e) {
+        btnSubmit.innerHTML = 'Registrar Asistencia';
+        habilitarBotonRegistro();
+        mostrarRespuesta("Error de conexion", "error");
+      }
+    }
+
+    document.getElementById("formulario").addEventListener("submit", enviarFormulario);
+
+    document.getElementById("id").addEventListener("input", function(e) {
+      const id = e.target.value.trim();
+
+      if (searchTimeout) clearTimeout(searchTimeout);
+
+      if (id.length > 0) {
+        ocultarInfoEstudiante();
+        deshabilitarBotonRegistro();
+        searchTimeout = setTimeout(() => buscarEstudiante(id), 1500);
+      }
     });
-  } catch(e){
-    document.getElementById("admin-grado").innerHTML = '<option value="">Error</option>';
-  }
-}
 
-async function generarCarnet(){
-  const id = document.getElementById("admin-id").value.trim();
-  if(!id) return showMsg("Ingrese un ID para carnet", "warning");
-  try{
-    const r = await api("generarCarnetPdfPorId", { id });
-    if(r && r.ok){
-      downloadBase64(r.data, r.filename, "application/pdf");
-      showMsg("Carnet generado", "success");
-    } else {
-      showMsg((r && r.mensaje) || "Error al generar", "error");
-    }
-  } catch(e){
-    showMsg("Error de conexión (carnet)", "error");
-  }
-}
+    document.getElementById("camera-toggle").addEventListener("change", function(e) {
+      toggleCamera(e.target.checked);
+    });
 
-async function generarLote(){
-  const grado = document.getElementById("admin-grado").value;
-  if(!grado) return showMsg("Seleccione grado/sección", "warning");
-  try{
-    const r = await api("generarCarnetsPdfPorGrado", { grado });
-    if(r && r.ok){
-      downloadBase64(r.data, r.filename, "application/pdf");
-      showMsg("Lote generado", "success");
-    } else {
-      showMsg((r && r.mensaje) || "Error al generar lote", "error");
-    }
-  } catch(e){
-    showMsg("Error de conexión (lote)", "error");
-  }
-}
+    document.getElementById('admin-toggle').addEventListener('click', function() {
+      const body = document.getElementById('admin-body');
+      body.style.display = body.style.display === 'none' ? 'block' : 'none';
+    });
 
-/************* Clock *************/
-async function tick(){
-  try{
-    const r = await api("obtenerHoraPeru");
-    const d = new Date(r.timestamp || Date.now());
-    document.getElementById("reloj").textContent =
-      d.toLocaleString("es-PE", { timeZone:"America/Lima" });
-  } catch(e){
-    document.getElementById("reloj").textContent = new Date().toLocaleString();
-  }
-}
+    document.getElementById('admin-generar-id').addEventListener('click', async function() {
+      const id = document.getElementById('admin-id').value.trim();
+      if (!id) {
+        mostrarAdminEstado('Ingrese un ID valido', true);
+        return;
+      }
+      mostrarAdminEstado('Generando PDF...', false);
 
-/************* EVENTS *************/
-let t = null;
-document.getElementById("id").addEventListener("input", (e)=>{
-  const v = e.target.value.trim();
-  if(t) clearTimeout(t);
-  if(v) t = setTimeout(()=> buscar(v), 700);
-  else hideStudent();
-});
+      try {
+        const resultado = await api("generarCarnetPdfPorId", { id });
 
-document.getElementById("btn").addEventListener("click", registrar);
-document.getElementById("btnCarnet").addEventListener("click", generarCarnet);
-document.getElementById("btnLote").addEventListener("click", generarLote);
+        if (!resultado || !resultado.ok) {
+          mostrarAdminEstado((resultado && resultado.mensaje) || 'Error al generar PDF', true);
+          return;
+        }
+        descargarArchivo(resultado.data, resultado.filename, 'application/pdf');
+        mostrarAdminEstado('PDF generado correctamente', false);
+      } catch (e) {
+        mostrarAdminEstado('Error de conexion', true);
+      }
+    });
 
-window.addEventListener("load", async ()=>{
-  await tick();
-  setInterval(tick, 15000);
-  await cargarGrados();
-  await startQR();
-});
-</script>
+    document.getElementById('admin-generar-lote').addEventListener('click', async function() {
+      const grado = document.getElementById('admin-grado').value;
+      if (!grado) {
+        mostrarAdminEstado('Seleccione un grado/seccion', true);
+        return;
+      }
+      mostrarAdminEstado('Generando lote...', false);
+
+      try {
+        const resultado = await api("generarCarnetsPdfPorGrado", { grado });
+
+        if (!resultado || !resultado.ok) {
+          mostrarAdminEstado((resultado && resultado.mensaje) || 'Error al generar lote', true);
+          return;
+        }
+        // tu backend devuelve PDF en base64 (no zip). Se descarga como PDF.
+        descargarArchivo(resultado.data, resultado.filename, 'application/pdf');
+        mostrarAdminEstado('Lote generado correctamente', false);
+      } catch (e) {
+        mostrarAdminEstado('Error de conexion', true);
+      }
+    });
+
+    window.addEventListener('load', function() {
+      sincronizarHoraPeru();
+      setInterval(actualizarReloj, 1000);
+      setInterval(sincronizarHoraPeru, 60000);
+      cargarGradosSecciones();
+      setTimeout(() => {
+        if (cameraEnabled) {
+          cargarCamaras();
+        }
+      }, 800);
+    });
+
+    window.addEventListener('beforeunload', function() {
+      detenerEscaneo();
+    });
+
+    window.addEventListener('resize', function() {
+      if (isScanning) reiniciarQR();
+    });
+
+    window.addEventListener('orientationchange', function() {
+      setTimeout(() => { if (isScanning) reiniciarQR(); }, 500);
+    });
+  </script>
 </body>
 </html>
