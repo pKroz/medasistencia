@@ -418,7 +418,7 @@ function playSuccessSound() {
     const ctx = new AudioCtx();
     const now = ctx.currentTime;
 
-    // 2 tonos tipo "ding-ding" (agradable, corto)
+    // 2 tonos tipo "ding-ding"
     const o1 = ctx.createOscillator();
     const g1 = ctx.createGain();
     o1.type = "sine";
@@ -441,11 +441,8 @@ function playSuccessSound() {
     o2.start(now + 0.18);
     o2.stop(now + 0.36);
 
-    // cerrar contexto para no consumir recursos
     setTimeout(() => { try { ctx.close(); } catch(_){} }, 500);
-  } catch (_) {
-    // si el navegador bloquea audio, no rompe nada
-  }
+  } catch (_) {}
 }
 
 /* ========= TIME ========= */
@@ -470,7 +467,6 @@ async function sincronizarHoraPeru() {
       actualizarReloj();
     }
   } catch (e) {
-    // fallback sin romper UI
     serverEpochMs = Date.now();
     perfStartMs = performance.now();
   }
@@ -547,7 +543,6 @@ function toggleCamera(enabled) {
 async function detenerEscaneo(ocultarUI = false) {
   try {
     if (qrCodeReader && isScanning) {
-      // IMPORTANTE: no ocultar/eliminar el DOM antes de stop()
       await qrCodeReader.stop();
     }
   } catch (err) {
@@ -708,6 +703,59 @@ async function registrarAsistencia(data) {
   return gasRequest("registrarAsistencia", payload);
 }
 
+/* ========= RECOMENDACIÓN 1: COLA DE ENVÍO (NO BLOQUEA UI) ========= */
+const sendQueue = [];
+let sending = false;
+
+function enqueueAttendance(data) {
+  sendQueue.push(data);
+  // feedback visual rápido (no bloquea)
+  actualizarEstadoQR(`En cola (${sendQueue.length})...`, false);
+  processQueue();
+}
+
+async function processQueue() {
+  if (sending) return;
+  sending = true;
+
+  while (sendQueue.length > 0) {
+    const item = sendQueue[0];
+
+    try {
+      actualizarEstadoQR(`Enviando... (pendientes: ${sendQueue.length})`, false);
+
+      const r = await registrarAsistencia(item);
+
+      if (r && r.exito) {
+        // éxito: sonido + mensaje (sin bloquear la siguiente lectura)
+        playSuccessSound();
+        mostrarRespuesta(`Se ha registrado asistencia para: ${item.nombre}`, "success");
+      } else {
+        mostrarRespuesta((r && r.mensaje) ? r.mensaje : "No se pudo registrar", "warning");
+      }
+
+      // ya respondió => sacamos de la cola
+      sendQueue.shift();
+
+    } catch (e) {
+      // sin conexión / error: mantenemos cola para reintentar
+      mostrarRespuesta("Sin conexión. Reintentando...", "warning");
+      actualizarEstadoQR(`Sin conexión. Pendientes: ${sendQueue.length}`, true);
+      break;
+    }
+  }
+
+  sending = false;
+
+  // si quedó cola, reintenta
+  if (sendQueue.length > 0) setTimeout(processQueue, 1500);
+
+  // si ya está vacío, vuelve a estado normal
+  if (sendQueue.length === 0) {
+    actualizarEstadoQR("Escaneando... Acerca el codigo QR", false);
+  }
+}
+
 /* ========= Admin ========= */
 function mostrarAdminEstado(mensaje, esError) {
   const status = document.getElementById('admin-status');
@@ -763,7 +811,8 @@ document.getElementById("formulario").addEventListener("submit", async (event) =
   }
 
   const btn = document.getElementById("btn-submit");
-  btn.innerHTML = '<div class="loading"></div> Registrando...';
+  // no te quedas esperando al servidor: UI se libera ya
+  btn.innerHTML = 'Registrar Asistencia';
   btn.disabled = true;
 
   const data = {
@@ -772,46 +821,24 @@ document.getElementById("formulario").addEventListener("submit", async (event) =
     area: studentData.area,
     cargo: studentData.cargo,
     telefono: studentData.telefono || '',
-    estado
+    estado,
+    // opcional: timestamp cliente (por si quieres auditar)
+    cliente_ts: obtenerAhoraServidorMs()
   };
 
-  try {
-    const r = await registrarAsistencia(data);
+  // FEEDBACK inmediato (sin bloquear)
+  mostrarRespuesta(`En cola: ${studentData.nombre}`, "warning");
 
-    // IMPORTANTE: devolver el texto del botón de inmediato (para que no se quede pegado)
-    btn.innerHTML = 'Registrar Asistencia';
+  // 1) limpiar y dejar listo para el siguiente YA
+  document.getElementById("formulario").reset();
+  document.getElementById("estado").value = "INGRESO";
+  ocultarInfoEstudiante();
+  deshabilitarBotonRegistro();
+  document.getElementById("id").value = "";
+  document.getElementById("id").focus();
 
-    if (r && r.exito) {
-      // Esperar 2 segundos, luego: sonido + mensaje + limpiar y dejar listo para otra persona
-      setTimeout(() => {
-        playSuccessSound();
-        mostrarRespuesta(`Se ha registrado asistencia para: ${studentData.nombre}`, "success");
-
-        // limpiar formulario / UI
-        document.getElementById("formulario").reset();
-        document.getElementById("estado").value = "INGRESO";
-        ocultarInfoEstudiante();
-
-        // dejar listo para el siguiente (botón NO queda “pegado”)
-        // Nota: el botón se habilita cuando se encuentre otro estudiante.
-        deshabilitarBotonRegistro();
-
-        // enfocar para el siguiente
-        document.getElementById("id").value = "";
-        document.getElementById("id").focus();
-      }, 600);
-
-    } else {
-      mostrarRespuesta((r && r.mensaje) ? r.mensaje : "No se pudo registrar", "warning");
-      // si sigue el mismo estudiante visible, vuelvo a habilitar para reintentar
-      if (studentData) habilitarBotonRegistro();
-    }
-
-  } catch (e) {
-    btn.innerHTML = 'Registrar Asistencia';
-    if (studentData) habilitarBotonRegistro();
-    mostrarRespuesta("Error de conexion", "error");
-  }
+  // 2) enviar en segundo plano (cola)
+  enqueueAttendance(data);
 });
 
 document.getElementById("id").addEventListener("input", (e) => {
