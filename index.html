@@ -370,301 +370,522 @@
   </div>
 
 <script>
-
-/* ========= CONFIG ========= */
-
+/* ========= CONFIG GITHUB PAGES ========= */
 const GAS_URL = "https://script.google.com/macros/s/AKfycbwrbQ5PVueOlhqpgc_kKYt5wCTdapOWySVwNdlf2FhpskEm6BqLq64cTg8iy2aH_brG/exec";
-const API_KEY = "MEDASSISTENCIA123";
+const API_KEY = "MEDASSISTENCIA123"; // debe ser igual al de tu Code.gs
 
-/* ========= JSONP ========= */
-
+/* ========= JSONP helper (GitHub Pages -> Apps Script) ========= */
 function gasRequest(action, params = {}) {
   return new Promise((resolve, reject) => {
+    const callback = "cb_" + Math.random().toString(36).slice(2);
+    const qs = new URLSearchParams({ action, key: API_KEY, callback, ...params });
 
-    const callback = "cb_" + Math.random().toString(36).substring(2);
+    const s = document.createElement("script");
+    s.src = GAS_URL + "?" + qs.toString();
 
-    const query = new URLSearchParams({
-      action: action,
-      key: API_KEY,
-      callback: callback,
-      ...params
-    });
-
-    const script = document.createElement("script");
-    script.src = GAS_URL + "?" + query.toString();
-
-    window[callback] = function(data){
-      delete window[callback];
-      script.remove();
+    window[callback] = (data) => {
+      try { delete window[callback]; } catch (_) {}
+      s.remove();
       resolve(data);
     };
 
-    script.onerror = function(){
-      delete window[callback];
-      script.remove();
-      reject("Error conexión GAS");
+    s.onerror = () => {
+      try { delete window[callback]; } catch (_) {}
+      s.remove();
+      reject(new Error("Error conectando con Apps Script"));
     };
 
-    document.body.appendChild(script);
-
+    document.body.appendChild(s);
   });
 }
 
-/* ========= VARIABLES ========= */
-
-let studentData = null;
+/* ========= STATE ========= */
 let qrCodeReader = null;
 let isScanning = false;
-let ultimoQr = {text:null,ts:0};
+let searchTimeout = null;
+let studentData = null;
+let selectedCameraId = null;
+let cameraEnabled = true;
+let serverEpochMs = null;
+let perfStartMs = null;
 
-/* ========= BUSCAR ESTUDIANTE ========= */
+/* ========= SONIDO SUCCESS (sin archivos, funciona en GitHub Pages) ========= */
+function playSuccessSound() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
 
-async function buscarEstudiante(id){
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
 
-  if(!id) return;
+    // 2 tonos tipo "ding-ding" (agradable, corto)
+    const o1 = ctx.createOscillator();
+    const g1 = ctx.createGain();
+    o1.type = "sine";
+    o1.frequency.setValueAtTime(880, now); // A5
+    g1.gain.setValueAtTime(0.0001, now);
+    g1.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+    g1.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    o1.connect(g1).connect(ctx.destination);
+    o1.start(now);
+    o1.stop(now + 0.18);
+
+    const o2 = ctx.createOscillator();
+    const g2 = ctx.createGain();
+    o2.type = "sine";
+    o2.frequency.setValueAtTime(1175, now + 0.18); // D6 aprox
+    g2.gain.setValueAtTime(0.0001, now + 0.18);
+    g2.gain.exponentialRampToValueAtTime(0.23, now + 0.20);
+    g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    o2.connect(g2).connect(ctx.destination);
+    o2.start(now + 0.18);
+    o2.stop(now + 0.36);
+
+    // cerrar contexto para no consumir recursos
+    setTimeout(() => { try { ctx.close(); } catch(_){} }, 500);
+  } catch (_) {
+    // si el navegador bloquea audio, no rompe nada
+  }
+}
+
+/* ========= TIME ========= */
+function obtenerAhoraServidorMs() {
+  if (serverEpochMs === null || perfStartMs === null || !window.performance) return Date.now();
+  return serverEpochMs + (performance.now() - perfStartMs);
+}
+
+function actualizarReloj() {
+  const ahora = new Date(obtenerAhoraServidorMs());
+  const hora = ahora.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false, timeZone:'America/Lima' });
+  const fecha = ahora.toLocaleDateString('es-PE', { weekday:'short', day:'numeric', month:'short', timeZone:'America/Lima' });
+  document.getElementById('reloj-tiempo').innerHTML = `${hora}<br><small>${fecha}</small>`;
+}
+
+async function sincronizarHoraPeru() {
+  try {
+    const r = await gasRequest("obtenerHoraPeru");
+    if (r && typeof r.timestamp === "number") {
+      serverEpochMs = r.timestamp;
+      perfStartMs = performance.now();
+      actualizarReloj();
+    }
+  } catch (e) {
+    // fallback sin romper UI
+    serverEpochMs = Date.now();
+    perfStartMs = performance.now();
+  }
+}
+
+/* ========= UI helpers ========= */
+function esMobile() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function actualizarEstadoQR(mensaje, esError = false) {
+  const el = document.getElementById('qr-status');
+  el.textContent = mensaje;
+  el.style.background = esError ? '#ffebee' : '#e3f2fd';
+  el.style.color = esError ? '#c62828' : '#1565c0';
+  el.style.display = 'block';
+}
+
+function mostrarRespuesta(mensaje, tipo) {
+  const r = document.getElementById("respuesta");
+  r.textContent = mensaje;
+  r.className = tipo;
+  r.style.display = "block";
+  if (tipo === "success") setTimeout(() => (r.style.display = "none"), 5000);
+}
+
+function mostrarBusqueda() {
+  const infoDiv = document.getElementById('employee-info');
+  infoDiv.style.display = 'block';
+  document.getElementById('employee-name').innerHTML = '<div class="loading"></div> Buscando...';
+  document.getElementById('employee-area').textContent = '-';
+  document.getElementById('employee-position').textContent = '-';
+}
+
+function mostrarInfoEstudiante(datos) {
+  const infoDiv = document.getElementById('employee-info');
+  infoDiv.style.display = 'block';
+  document.getElementById('employee-name').textContent = datos.nombre || '-';
+  document.getElementById('employee-area').textContent = datos.area || '-';
+  document.getElementById('employee-position').textContent = datos.cargo || '-';
+}
+
+function ocultarInfoEstudiante() {
+  document.getElementById('employee-info').style.display = 'none';
+  studentData = null;
+}
+
+function habilitarBotonRegistro() {
+  document.getElementById('btn-submit').disabled = false;
+}
+function deshabilitarBotonRegistro() {
+  document.getElementById('btn-submit').disabled = true;
+}
+
+/* ========= CAMERA / QR ========= */
+function toggleCamera(enabled) {
+  cameraEnabled = enabled;
+  const statusSpan = document.getElementById('camera-status');
+
+  if (enabled) {
+    statusSpan.textContent = 'Activada';
+    statusSpan.style.color = 'var(--primary)';
+    document.getElementById('reader').style.display = 'block';
+    document.getElementById('qr-status').style.display = 'block';
+    document.getElementById('reiniciar-btn').style.display = 'block';
+    cargarCamaras();
+  } else {
+    statusSpan.textContent = 'Desactivada';
+    statusSpan.style.color = '#999';
+    detenerEscaneo(true);
+  }
+}
+
+async function detenerEscaneo(ocultarUI = false) {
+  try {
+    if (qrCodeReader && isScanning) {
+      // IMPORTANTE: no ocultar/eliminar el DOM antes de stop()
+      await qrCodeReader.stop();
+    }
+  } catch (err) {
+    console.warn("detenerEscaneo:", err);
+  } finally {
+    try { if (qrCodeReader) await qrCodeReader.clear(); } catch (_) {}
+    qrCodeReader = null;
+    isScanning = false;
+
+    if (ocultarUI) {
+      document.getElementById('reader').style.display = 'none';
+      document.getElementById('qr-status').style.display = 'none';
+      document.getElementById('reiniciar-btn').style.display = 'none';
+      document.getElementById('camera-controls').style.display = 'none';
+    }
+  }
+}
+
+function mostrarSelectorCamara(devices) {
+  const controlsDiv = document.getElementById('camera-controls');
+  const select = document.getElementById('camera-select');
+
+  select.innerHTML = '<option value="">Seleccione una camara...</option>';
+
+  devices.forEach((device, index) => {
+    const option = document.createElement('option');
+    option.value = device.id;
+
+    let tipo = 'Camara ' + (index + 1);
+    const label = (device.label || "").toLowerCase();
+    if (label.includes('back') || label.includes('rear')) tipo = 'Camara Trasera';
+    if (label.includes('front') || label.includes('user')) tipo = 'Camara Frontal';
+
+    option.textContent = tipo;
+    select.appendChild(option);
+  });
+
+  controlsDiv.style.display = 'block';
+
+  select.onchange = () => {
+    if (select.value) {
+      selectedCameraId = select.value;
+      reiniciarQR();
+    }
+  };
+
+  const rear = devices.find(d => ((d.label||"").toLowerCase().includes('back') || (d.label||"").toLowerCase().includes('rear')));
+  if (rear) {
+    select.value = rear.id;
+    selectedCameraId = rear.id;
+  } else {
+    select.value = devices[0].id;
+    selectedCameraId = devices[0].id;
+  }
+}
+
+async function cargarCamaras() {
+  if (!cameraEnabled) return;
+
+  try {
+    const devices = await Html5Qrcode.getCameras();
+    if (!devices || devices.length === 0) {
+      actualizarEstadoQR("No se detectaron camaras", true);
+      return;
+    }
+
+    document.getElementById('reader').style.display = 'block';
+    document.getElementById('qr-status').style.display = 'block';
+    document.getElementById('reiniciar-btn').style.display = 'block';
+
+    if (esMobile() && devices.length > 1) {
+      mostrarSelectorCamara(devices);
+    } else {
+      const preferred = devices.find(d => ((d.label||"").toLowerCase().includes('back') || (d.label||"").toLowerCase().includes('rear')));
+      selectedCameraId = (preferred ? preferred.id : devices[0].id);
+    }
+
+    iniciarEscaneo();
+  } catch (err) {
+    console.error("Error getting cameras:", err);
+    actualizarEstadoQR("Error al detectar camaras", true);
+  }
+}
+
+function iniciarEscaneo() {
+  if (isScanning || !selectedCameraId || !cameraEnabled) return;
+
+  actualizarEstadoQR("Iniciando camara...");
+
+  qrCodeReader = new Html5Qrcode("reader");
+
+  const config = {
+    fps: 10,
+    qrbox: {
+      width: Math.min(250, window.innerWidth * 0.7),
+      height: Math.min(250, window.innerWidth * 0.7)
+    },
+    aspectRatio: 1.0
+  };
+
+  qrCodeReader.start(
+    selectedCameraId,
+    config,
+    (decodedText) => {
+      actualizarEstadoQR("QR detectado correctamente");
+      procesarQR(decodedText);
+    },
+    () => {}
+  ).then(() => {
+    isScanning = true;
+    actualizarEstadoQR("Escaneando... Acerca el codigo QR");
+  }).catch(err => {
+    console.error("Error starting QR scanner:", err);
+    actualizarEstadoQR("Error al acceder a la camara", true);
+  });
+}
+
+function reiniciarQR() {
+  detenerEscaneo(false).then(() => {
+    if (!cameraEnabled) return;
+    setTimeout(() => iniciarEscaneo(), 350);
+  });
+}
+
+function procesarQR(textoQR) {
+  const idEstudiante = (textoQR || "").trim();
+  document.getElementById("id").value = idEstudiante;
+  buscarEstudiante(idEstudiante);
+  mostrarRespuesta("ID cargado desde QR", "success");
+}
+
+/* ========= API Calls ========= */
+async function buscarEstudiante(id) {
+  const clean = (id || "").trim();
+  if (!clean) { ocultarInfoEstudiante(); return; }
 
   mostrarBusqueda();
   deshabilitarBotonRegistro();
 
-  try{
-
-    const r = await gasRequest("buscarEstudiante",{id:id});
-
-    if(r && r.encontrado){
-
+  try {
+    const r = await gasRequest("buscarEstudiante", { id: clean });
+    if (r && r.encontrado) {
       studentData = r.datos;
       mostrarInfoEstudiante(r.datos);
       habilitarBotonRegistro();
-
-    }else{
-
+    } else {
       ocultarInfoEstudiante();
-      mostrarRespuesta("No encontrado","warning");
+      mostrarRespuesta((r && r.mensaje) ? r.mensaje : "No encontrado", "warning");
+    }
+  } catch (e) {
+    ocultarInfoEstudiante();
+    mostrarRespuesta("Error al buscar estudiante", "error");
+  }
+}
 
+async function registrarAsistencia(data) {
+  const payload = { data: JSON.stringify(data || {}) };
+  return gasRequest("registrarAsistencia", payload);
+}
+
+/* ========= Admin ========= */
+function mostrarAdminEstado(mensaje, esError) {
+  const status = document.getElementById('admin-status');
+  status.textContent = mensaje;
+  status.style.display = 'block';
+  status.style.background = esError ? '#fee2e2' : '#dcfce7';
+  status.style.color = esError ? '#b91c1c' : '#166534';
+}
+
+function descargarArchivo(base64, filename, mimeType) {
+  const a = document.createElement('a');
+  a.href = 'data:' + mimeType + ';base64,' + base64;
+  a.download = filename || 'archivo';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function cargarGradosSecciones() {
+  try {
+    const r = await gasRequest("listarGradosSecciones");
+    const select = document.getElementById('admin-grado');
+
+    if (!r || r.error) {
+      mostrarAdminEstado('No se pudo cargar grados/seccion', true);
+      return;
     }
 
-  }catch(e){
+    const grados = r.grados || [];
+    select.innerHTML = '<option value="">Seleccione...</option>';
 
-    mostrarRespuesta("Error buscando estudiante","error");
-
+    grados.forEach(g => {
+      const option = document.createElement('option');
+      option.value = g;
+      option.textContent = g;
+      select.appendChild(option);
+    });
+  } catch (e) {
+    mostrarAdminEstado('No se pudo cargar grados/seccion', true);
   }
-
 }
 
-/* ========= REGISTRAR ========= */
-
-async function registrarAsistencia(data){
-
-  return gasRequest("registrarAsistencia",{
-    data: JSON.stringify(data)
-  });
-
-}
-
-/* ========= FORM SUBMIT ========= */
-
-document.getElementById("formulario").addEventListener("submit", async function(e){
-
-  e.preventDefault();
+/* ========= Events ========= */
+document.getElementById("formulario").addEventListener("submit", async (event) => {
+  event.preventDefault();
 
   const id = document.getElementById("id").value.trim();
   const estado = document.getElementById("estado").value;
 
-  if(!id || !studentData){
-    mostrarRespuesta("Ingrese un ID válido","error");
+  if (!id || !studentData) {
+    mostrarRespuesta("Por favor ingrese un ID valido", "error");
     return;
   }
 
   const btn = document.getElementById("btn-submit");
-  const textoOriginal = btn.innerHTML;
-
   btn.innerHTML = '<div class="loading"></div> Registrando...';
   btn.disabled = true;
 
   const data = {
-    id:id,
-    nombre:studentData.nombre,
-    area:studentData.area,
-    cargo:studentData.cargo,
-    telefono:studentData.telefono || '',
-    estado:estado
+    id,
+    nombre: studentData.nombre,
+    area: studentData.area,
+    cargo: studentData.cargo,
+    telefono: studentData.telefono || '',
+    estado
   };
 
-  const TIMEOUT = 12000;
+  try {
+    const r = await registrarAsistencia(data);
 
-  const timeoutPromise = new Promise((_,reject)=>
-    setTimeout(()=>reject(new Error("TIMEOUT")),TIMEOUT)
-  );
+    // IMPORTANTE: devolver el texto del botón de inmediato (para que no se quede pegado)
+    btn.innerHTML = 'Registrar Asistencia';
 
-  try{
+    if (r && r.exito) {
+      // Esperar 2 segundos, luego: sonido + mensaje + limpiar y dejar listo para otra persona
+      setTimeout(() => {
+        playSuccessSound();
+        mostrarRespuesta(`Se ha registrado asistencia para: ${studentData.nombre}`, "success");
 
-    const r = await Promise.race([
-      registrarAsistencia(data),
-      timeoutPromise
-    ]);
+        // limpiar formulario / UI
+        document.getElementById("formulario").reset();
+        document.getElementById("estado").value = "INGRESO";
+        ocultarInfoEstudiante();
 
-    if(r && r.exito){
+        // dejar listo para el siguiente (botón NO queda “pegado”)
+        // Nota: el botón se habilita cuando se encuentre otro estudiante.
+        deshabilitarBotonRegistro();
 
-      mostrarRespuesta(`${estado} registrado a las ${r.hora}`,"success");
+        // enfocar para el siguiente
+        document.getElementById("id").value = "";
+        document.getElementById("id").focus();
+      }, 2000);
 
-      document.getElementById("formulario").reset();
-      document.getElementById("estado").value="INGRESO";
-
-      ocultarInfoEstudiante();
-      deshabilitarBotonRegistro();
-
-    }else{
-
-      mostrarRespuesta("No se pudo registrar","warning");
-      habilitarBotonRegistro();
-
+    } else {
+      mostrarRespuesta((r && r.mensaje) ? r.mensaje : "No se pudo registrar", "warning");
+      // si sigue el mismo estudiante visible, vuelvo a habilitar para reintentar
+      if (studentData) habilitarBotonRegistro();
     }
 
-  }catch(e){
-
-    if(e.message==="TIMEOUT"){
-      mostrarRespuesta("Se registró pero el servidor tardó en responder","warning");
-    }else{
-      mostrarRespuesta("Error de conexión","error");
-    }
-
-    habilitarBotonRegistro();
-
-  }finally{
-
-    btn.innerHTML = textoOriginal;
-
+  } catch (e) {
+    btn.innerHTML = 'Registrar Asistencia';
+    if (studentData) habilitarBotonRegistro();
+    mostrarRespuesta("Error de conexion", "error");
   }
-
 });
 
-/* ========= QR ========= */
-
-function procesarQR(texto){
-
-  const ahora = Date.now();
-
-  if(ultimoQr.text===texto && ahora-ultimoQr.ts<2500){
-    return;
-  }
-
-  ultimoQr = {text:texto,ts:ahora};
-
-  document.getElementById("id").value = texto;
-  buscarEstudiante(texto);
-
-}
-
-/* ========= INICIAR QR ========= */
-
-function iniciarQR(){
-
-  qrCodeReader = new Html5Qrcode("reader");
-
-  qrCodeReader.start(
-    { facingMode: "environment" },
-    { fps: 10, qrbox: 250 },
-
-    decodedText => {
-      procesarQR(decodedText);
-    },
-
-    error => {}
-  ).then(()=>{
-    isScanning=true;
-  }).catch(err=>{
-    console.error(err);
-  });
-
-}
-
-/* ========= REINICIAR QR ========= */
-
-async function reiniciarQR(){
-
-  if(qrCodeReader && isScanning){
-    try{
-      await qrCodeReader.stop();
-    }catch(e){}
-  }
-
-  iniciarQR();
-
-}
-
-/* ========= UI ========= */
-
-function mostrarBusqueda(){
-
-  const info=document.getElementById("employee-info");
-  info.style.display="block";
-
-  document.getElementById("employee-name").innerHTML="Buscando...";
-  document.getElementById("employee-area").textContent="-";
-  document.getElementById("employee-position").textContent="-";
-
-}
-
-function mostrarInfoEstudiante(d){
-
-  document.getElementById("employee-info").style.display="block";
-
-  document.getElementById("employee-name").textContent=d.nombre;
-  document.getElementById("employee-area").textContent=d.area;
-  document.getElementById("employee-position").textContent=d.cargo;
-
-}
-
-function ocultarInfoEstudiante(){
-  document.getElementById("employee-info").style.display="none";
-  studentData=null;
-}
-
-function habilitarBotonRegistro(){
-  document.getElementById("btn-submit").disabled=false;
-}
-
-function deshabilitarBotonRegistro(){
-  document.getElementById("btn-submit").disabled=true;
-}
-
-function mostrarRespuesta(mensaje,tipo){
-
-  const r=document.getElementById("respuesta");
-
-  r.textContent=mensaje;
-  r.className=tipo;
-  r.style.display="block";
-
-  if(tipo==="success"){
-    setTimeout(()=>r.style.display="none",4000);
-  }
-
-}
-
-/* ========= ID INPUT ========= */
-
-document.getElementById("id").addEventListener("input",function(){
-
-  const id=this.value.trim();
+document.getElementById("id").addEventListener("input", (e) => {
+  const id = (e.target.value || "").trim();
+  if (searchTimeout) clearTimeout(searchTimeout);
 
   ocultarInfoEstudiante();
   deshabilitarBotonRegistro();
 
-  if(id.length>0){
-    setTimeout(()=>buscarEstudiante(id),1000);
+  if (id.length > 0) {
+    searchTimeout = setTimeout(() => buscarEstudiante(id), 1200);
   }
-
 });
 
-/* ========= START ========= */
-
-window.addEventListener("load",function(){
-
-  iniciarQR();
-
+document.getElementById("camera-toggle").addEventListener("change", (e) => {
+  toggleCamera(e.target.checked);
 });
 
+document.getElementById('admin-toggle').addEventListener('click', () => {
+  const body = document.getElementById('admin-body');
+  body.style.display = (body.style.display === 'none') ? 'block' : 'none';
+});
+
+document.getElementById('admin-generar-id').addEventListener('click', async () => {
+  const id = document.getElementById('admin-id').value.trim();
+  if (!id) { mostrarAdminEstado('Ingrese un ID valido', true); return; }
+
+  mostrarAdminEstado('Generando PDF...', false);
+  try {
+    const r = await gasRequest("generarCarnetPdfPorId", { id });
+    if (!r || !r.ok) {
+      mostrarAdminEstado((r && r.mensaje) || 'Error al generar PDF', true);
+      return;
+    }
+    descargarArchivo(r.data, r.filename, 'application/pdf');
+    mostrarAdminEstado('PDF generado correctamente', false);
+  } catch (e) {
+    mostrarAdminEstado('Error de conexion', true);
+  }
+});
+
+document.getElementById('admin-generar-lote').addEventListener('click', async () => {
+  const grado = document.getElementById('admin-grado').value;
+  if (!grado) { mostrarAdminEstado('Seleccione un grado/seccion', true); return; }
+
+  mostrarAdminEstado('Generando lote...', false);
+  try {
+    const r = await gasRequest("generarCarnetsPdfPorGrado", { grado });
+    if (!r || !r.ok) {
+      mostrarAdminEstado((r && r.mensaje) || 'Error al generar lote', true);
+      return;
+    }
+    descargarArchivo(r.data, r.filename, 'application/pdf');
+    mostrarAdminEstado('Lote generado correctamente', false);
+  } catch (e) {
+    mostrarAdminEstado('Error de conexion', true);
+  }
+});
+
+/* ========= Start ========= */
+window.addEventListener('load', async () => {
+  await sincronizarHoraPeru();
+  setInterval(actualizarReloj, 1000);
+  setInterval(sincronizarHoraPeru, 60000);
+
+  cargarGradosSecciones();
+
+  setTimeout(() => { if (cameraEnabled) cargarCamaras(); }, 800);
+});
+
+window.addEventListener('beforeunload', () => { detenerEscaneo(false); });
+
+window.addEventListener('resize', () => { if (isScanning) reiniciarQR(); });
+window.addEventListener('orientationchange', () => { setTimeout(() => { if (isScanning) reiniciarQR(); }, 450); });
 </script>
 </body>
 </html>
